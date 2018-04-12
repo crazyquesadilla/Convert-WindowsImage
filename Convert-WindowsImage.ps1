@@ -1,7 +1,6 @@
 ﻿Function
 Convert-WindowsImage
 {
-
   <#
     .NOTES
         Copyright (c) Microsoft Corporation.  All rights reserved.
@@ -607,6 +606,7 @@ You can use the fields below to configure the VHD or VHDX that you want to creat
 
             $code      = @"
 using System;
+using System.Diagnostics;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
@@ -1832,15 +1832,14 @@ namespace WIM2VHD {
         }
 
         public void
-        Apply(
-            string ApplyToPath) {
-
+        Apply(string ApplyToPath) {
+            Debug.WriteLine(ApplyToPath);
             if (string.IsNullOrEmpty(ApplyToPath)) {
                 throw new ArgumentNullException("ApplyToPath");
             }
 
             ApplyToPath = Path.GetFullPath(ApplyToPath);
-
+            Debug.WriteLine(ApplyToPath);
             if (!Directory.Exists(ApplyToPath)) {
                 throw new DirectoryNotFoundException("The WIM cannot be applied because the specified directory was not found.");
             }
@@ -3092,8 +3091,7 @@ namespace WIM2VHD {
 
             ##########################################################################################
 
-            function
-            Write-W2VInfo {
+            function Write-W2VInfo {
             # Function to make the Write-Host output a bit prettier. 
                 [CmdletBinding()]
                 param(
@@ -4062,7 +4060,7 @@ namespace WIM2VHD {
     
                 # We're good.  Open the WIM container.
                 $openWim     = New-Object WIM2VHD.WimFile $SourcePath
-
+                
                 # Let's see if we're running against an unstaged build.  If we are, we need to blow up.
                 if ($openWim.ImageNames.Contains("Windows Longhorn Client") -or
                     $openWim.ImageNames.Contains("Windows Longhorn Server") -or
@@ -4101,7 +4099,7 @@ namespace WIM2VHD {
                         throw
                     }
 
-                    Write-W2VInfo
+                    Write-W2VInfo 
                     Write-W2VInfo "Image $($openImage.ImageIndex) selected ($($openImage.ImageFlags))..."
 
                     # Check to make sure that the image we're applying is Windows 7 or greater.
@@ -4157,7 +4155,10 @@ namespace WIM2VHD {
                     } elseif ( $VHDPartitionStyle -eq "GPT" ) {
                 
                         Write-W2VInfo "Disk partitioned"
-
+                        if ($openimage.ImageFlags -eq "ServerStandardACor" -or $openimage.ImageFlags -eq "ServerDatacenterACor"){
+                            $PartitionRecovery = New-Partition -disknumber $openvhd.DiskIndex -size 500MB -GptType '{de94bba4-06d1-4d40-a16a-bfd50179d6ac}'
+                            Write-W2VInfo "Recovery Partition created"
+                        }
                         If
                         (
                             $BCDinVHD -eq "VirtualMachine"
@@ -4204,21 +4205,33 @@ format fs=fat32 label="System"
                         $partition       | Add-PartitionAccessPath -AssignDriveLetter
                         $drive           = $(Get-Partition -Disk $disk).AccessPaths[0]
                         Write-W2VInfo "Access path ($drive) has been assigned..."
-                    } elseif ( $VHDPartitionStyle -eq "GPT" ) {
-
+                    } elseif ( $VHDPartitionStyle -eq "GPT" ) {                      
                         If
                         (
                             $BCDinVHD -eq "VirtualMachine"
                         )
                         {
+                            if ($openimage.ImageFlags -eq "ServerStandardACor" -or $openimage.ImageFlags -eq "ServerDatacenterACor"){
+                                $partitionRecovery | Add-PartitionAccessPath -AssignDriveLetter
+                                $driveRecovery = (Get-Partition -disk $disk | Where-Object guid -eq $PartitionRecovery.guid).AccessPaths[0]
+                                Write-W2VInfo "Access path ($driveRecovery) has been assigned to the Recovery Volume..."
 
-                            $partitionSystem | Add-PartitionAccessPath -AssignDriveLetter
-                            $driveSystem     = $(Get-Partition -Disk $disk).AccessPaths[1]
-                            Write-W2VInfo "Access path ($driveSystem) has been assigned to the System Volume..."
+                                $partitionSystem | Add-PartitionAccessPath -AssignDriveLetter
+                                $driveSystem = (Get-Partition -disk $disk | Where-Object guid -eq $partitionSystem.guid).AccessPaths[0]
+                                Write-W2VInfo "Access path ($driveSystem) has been assigned to the System Volume..."
 
-                            $partition       | Add-PartitionAccessPath -AssignDriveLetter
-                            $drive           = $(Get-Partition -Disk $disk).AccessPaths[2]
-                            Write-W2VInfo "Access path ($drive) has been assigned to the Boot Volume..."
+                                $partition       | Add-PartitionAccessPath -AssignDriveLetter
+                                $drive = (Get-Partition -disk $disk | Where-Object guid -eq $partition.guid).AccessPaths[0]
+                                Write-W2VInfo "Access path ($drive) has been assigned to the Boot Volume..."
+                            } else {
+                                $partitionSystem | Add-PartitionAccessPath -AssignDriveLetter
+                                $driveSystem     = $(Get-Partition -Disk $disk).AccessPaths[1]
+                                Write-W2VInfo "Access path ($driveSystem) has been assigned to the System Volume..."
+
+                                $partition       | Add-PartitionAccessPath -AssignDriveLetter
+                                $drive           = $(Get-Partition -Disk $disk).AccessPaths[2]
+                                Write-W2VInfo "Access path ($drive) has been assigned to the Boot Volume..."
+                            }
                         }
                         ElseIf
                         (
@@ -4226,15 +4239,15 @@ format fs=fat32 label="System"
                         )
                         {
                             $partition       | Add-PartitionAccessPath -AssignDriveLetter
-                            $drive           = $(Get-Partition -Disk $disk).AccessPaths[1]
+                            $drive           = $(Get-Partition -Disk $disk).AccessPaths[0]
                             Write-W2VInfo "Access path ($drive) has been assigned to the Boot Volume..."
                         }
                     }
-
+                    Write-W2VInfo "$drive"
                     Write-W2VInfo "Applying image to $VHDFormat. This could take a while..."
 
                     $openImage.Apply($drive)
-
+                    
                     if (![string]::IsNullOrEmpty($UnattendPath)) {
                         Write-W2VInfo "Applying unattend file ($(Split-Path $UnattendPath -Leaf))..."
                         Copy-Item -Path $UnattendPath -Destination (Join-Path $drive "unattend.xml") -Force
@@ -4250,8 +4263,10 @@ format fs=fat32 label="System"
                         # In this case VHD is "Self-Sustainable", i.e. contains a boot loader and does not depend on external files.
                         # (There's nothing "External" from the perspecitve of VM by definition).
 
-                            Write-W2VInfo "Image applied. Making image bootable..."
-
+                            Write-W2VInfo "Image applied. Making image bootable ..."
+                            Write-W2VInfo "VHDPartitionStyle: $VHDPartitionStyle"
+                            Write-W2VInfo "Drive: $drive"
+                            Write-W2VInfo "System Drive: $driveSystem"
                             if ( $VHDPartitionStyle -eq "MBR" ) {
 
                                 $bcdBootArgs = @(
