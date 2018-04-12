@@ -606,7 +606,6 @@ You can use the fields below to configure the VHD or VHDX that you want to creat
 
             $code      = @"
 using System;
-using System.Diagnostics;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
@@ -1833,13 +1832,11 @@ namespace WIM2VHD {
 
         public void
         Apply(string ApplyToPath) {
-            Debug.WriteLine(ApplyToPath);
             if (string.IsNullOrEmpty(ApplyToPath)) {
                 throw new ArgumentNullException("ApplyToPath");
             }
 
             ApplyToPath = Path.GetFullPath(ApplyToPath);
-            Debug.WriteLine(ApplyToPath);
             if (!Directory.Exists(ApplyToPath)) {
                 throw new DirectoryNotFoundException("The WIM cannot be applied because the specified directory was not found.");
             }
@@ -4243,7 +4240,7 @@ format fs=fat32 label="System"
                             Write-W2VInfo "Access path ($drive) has been assigned to the Boot Volume..."
                         }
                     }
-                    Write-W2VInfo "$drive"
+
                     Write-W2VInfo "Applying image to $VHDFormat. This could take a while..."
 
                     $openImage.Apply($drive)
@@ -4264,9 +4261,7 @@ format fs=fat32 label="System"
                         # (There's nothing "External" from the perspecitve of VM by definition).
 
                             Write-W2VInfo "Image applied. Making image bootable ..."
-                            Write-W2VInfo "VHDPartitionStyle: $VHDPartitionStyle"
-                            Write-W2VInfo "Drive: $drive"
-                            Write-W2VInfo "System Drive: $driveSystem"
+
                             if ( $VHDPartitionStyle -eq "MBR" ) {
 
                                 $bcdBootArgs = @(
